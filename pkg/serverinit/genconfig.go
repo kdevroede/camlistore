@@ -279,6 +279,63 @@ func addS3Config(params *configPrefixesParams, prefixes jsonconfig.Obj, s3 strin
 	return nil
 }
 
+func addSwiftConfig(params *configPrefixesParams, prefixes jsonconfig.Obj, highCfg string) error {
+	f := strings.SplitN(highCfg, ":", 5)
+	if len(f) < 5 {
+		return errors.New(`genconfig: expected "swift" field to be of form "user:tenant:secret:container:auth_url"`)
+	}
+	user, tenant, secret, container, authUrl := f[0], f[1], f[2], f[3], f[4]
+
+	isPrimary := false
+	if _, ok := prefixes["/bs/"]; !ok {
+		isPrimary = true
+	}
+
+	swiftPrefix := ""
+	if isPrimary {
+		swiftPrefix = "/bs/"
+	} else {
+		swiftPrefix = "/sto-swift/"
+	}
+
+	prefixes[swiftPrefix] = map[string]interface{}{
+		"handler": "storage-swift",
+		"handlerArgs": map[string]interface{}{
+			"container": container,
+			"tenant":    tenant,
+			"user_name": user,
+			"secret":    secret,
+			"auth_url":  authUrl,
+		},
+	}
+
+	if isPrimary {
+		// TODO: cacheBucket like s3CacheBucket?
+		prefixes["/cache/"] = map[string]interface{}{
+			"handler": "storage-filesystem",
+			"handlerArgs": map[string]interface{}{
+				"path": filepath.Join(tempDir(), "camli-cache"),
+			},
+		}
+	} else {
+		if params.blobPath == "" {
+			panic("unexpected empty blobpath with sync-to-swift")
+		}
+		prefixes["/sync-to-swift/"] = map[string]interface{}{
+			"handler": "sync",
+			"handlerArgs": map[string]interface{}{
+				"from": "/bs/",
+				"to":   swiftPrefix,
+				"queue": map[string]interface{}{
+					"type": "kv",
+					"file": filepath.Join(params.blobPath, "sync-to-swift-queue.kv"),
+				},
+			},
+		}
+	}
+	return nil
+}
+
 func addGoogleDriveConfig(prefixes jsonconfig.Obj, highCfg string) error {
 	f := strings.SplitN(highCfg, ":", 4)
 	if len(f) != 4 {
@@ -546,6 +603,7 @@ func genLowLevelConfig(conf *Config) (lowLevelConf *Config, err error) {
 		s3                 = conf.OptionalString("s3", "")                 // "access_key_id:secret_access_key:bucket[:hostname]"
 		googlecloudstorage = conf.OptionalString("googlecloudstorage", "") // "clientId:clientSecret:refreshToken:bucket"
 		googledrive        = conf.OptionalString("googledrive", "")        // "clientId:clientSecret:refreshToken:parentId"
+		swift              = conf.OptionalString("swift", "")              // "tenant:secret:container:auth_url"
 		// Enable the share handler. If true, and shareHandlerPath is empty,
 		// then shareHandlerPath defaults to "/share/".
 		shareHandler = conf.OptionalBool("shareHandler", false)
@@ -735,6 +793,11 @@ func genLowLevelConfig(conf *Config) (lowLevelConf *Config, err error) {
 	}
 	if googlecloudstorage != "" {
 		if err := addGoogleCloudStorageConfig(prefixes, googlecloudstorage); err != nil {
+			return nil, err
+		}
+	}
+	if swift != "" {
+		if err := addSwiftConfig(prefixesParams, prefixes, swift); err != nil {
 			return nil, err
 		}
 	}

@@ -59,6 +59,7 @@ import (
 	_ "camlistore.org/pkg/blobserver/replica"
 	_ "camlistore.org/pkg/blobserver/s3"
 	_ "camlistore.org/pkg/blobserver/shard"
+	_ "camlistore.org/pkg/blobserver/swift"
 	// Indexers: (also present themselves as storage targets)
 	// sqlite is taken care of in option_sqlite.go
 	"camlistore.org/pkg/index" // base indexer + in-memory dev index
